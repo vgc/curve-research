@@ -1,0 +1,9 @@
+CMakeLists.txt.user*
+/build*
+/out/
+.vs
+.DS_Store
+.directory
+CMakeSettings.json
+__pycache__
+/*.patch
