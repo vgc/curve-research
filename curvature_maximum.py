@@ -178,7 +178,7 @@ if 1:
 
     fig = plgo.Figure()
     fig.add_surface(z=grid0[:,:,2].T, x=a0Space, y=a1Space, colorscale='YlGnBu', name="minKMax")
-    fig.add_surface(z=grid1[:,:,2].T, x=a0Space, y=a1Space, colorscale='YlOrRd', name="OGH", opacity=0.9)
+    #fig.add_surface(z=grid1[:,:,2].T, x=a0Space, y=a1Space, colorscale='YlOrRd', name="OGH", opacity=0.9)
     #fig = make_subplots(rows=1, cols=2, specs=[[{'type': 'surface'}, {'type': 'surface'}]])
     #fig.add_trace(plgo.Surface(z=grid0[:,:,2], x=a0Space, y=a1Space), row=1, col=1)
     #fig.add_trace(plgo.Surface(z=grid1[:,:,2], x=a0Space, y=a1Space), row=1, col=2)
