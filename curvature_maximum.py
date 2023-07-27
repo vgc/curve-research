@@ -100,10 +100,10 @@ def max_curvature(angle_bound_bezier, x, u, debug=False):
 
     opt_args = dict(
         method="L-BFGS-B",
-        tol=0.001,
+        tol=0.0001,
         bounds=opt_bounds,
         options = dict(
-            maxiter=100,
+            maxiter=200,
             #eps=0.0001,
             #finite_diff_rel_step=0.0001
         )
@@ -120,36 +120,12 @@ def max_curvature(angle_bound_bezier, x, u, debug=False):
     r = spo.minimize(kfun, np.array((0,)), **opt_args)
     return -kfun(r.x)
 
-def find_speeds_for_minimum_curvature_max(angle0, angle1, u, speeds, plot=False):
+def find_speeds_for_minimum_curvature_max(angle0, angle1, u, plot=False):
     angle_bound_bezier = make_angle_bound_cubic_bezier(angle0, angle1)
 
-    opt_args = dict(
-            method="L-BFGS-B",
-            tol=0.01,
-            bounds=((speeds[0], speeds[-1]), (speeds[0], speeds[-1])),
-            options = dict(
-                maxiter=500,
-            )
-        )
-
-    def fun(x):
-        return max_curvature(angle_bound_bezier, x, u)
-
-    # todo: there can be local minimums and only playing with input guess does
-    # not always help finding them. a dense grid first could help..
-    rs = [
-        spo.minimize(fun, np.array((speeds[ 0], speeds[ 0])), **opt_args),
-        spo.minimize(fun, np.array((speeds[ 0], speeds[-1])), **opt_args),
-        spo.minimize(fun, np.array((speeds[-1], speeds[ 0])), **opt_args),
-        spo.minimize(fun, np.array((speeds[-1], speeds[-1])), **opt_args)]
-
-    kms = [fun(r.x) for r in rs]
-    km = min(kms)
-    r = rs[kms.index(km)]
-    return np.array((r.x[0], r.x[1], km))
-
-    res = len(speeds)
-    grid = np.ndarray(shape=(res, res), dtype=float)
+    n = 20
+    speeds = np.linspace(minMag, maxMag, n)
+    grid = np.ndarray(shape=(n, n), dtype=float)
     for i, x in enumerate(speeds):
         for j, y in enumerate(speeds):
             data = angle_bound_bezier(x, y)(u)
@@ -165,8 +141,9 @@ def find_speeds_for_minimum_curvature_max(angle0, angle1, u, speeds, plot=False)
         cmax = min(gridMax, gridMin + 50)
         cscale = plx.colors.sequential.Turbo
         cscale.append('#303030')
-        fig = plgo.Figure(data=[plgo.Surface(
-            z=grid, x=speeds, y=speeds, colorscale=cscale, cmin=gridMin, cmax=cmax)])
+        fig = plgo.Figure()
+        fig = fig.add_contour(
+            z=grid, x=speeds, y=speeds, colorscale=cscale, zmin=gridMin, zmax=cmax)
         fig.update_layout(
             scene = dict(
                 xaxis_title='Speed0',
@@ -174,11 +151,37 @@ def find_speeds_for_minimum_curvature_max(angle0, angle1, u, speeds, plot=False)
                 zaxis_title='Curvature Maximum',
                 zaxis=dict(range=[0, min(gridMax, KInf-1)])))
         fig.show()
+
     coords = np.divmod(grid.argmin(), grid.shape[1])
-    minCurvatureMax = grid[coords]
-    speed0 = speeds[coords[0]]
-    speed1 = speeds[coords[1]]
-    return np.array((speed0, speed1, minCurvatureMax))
+
+    #minCurvatureMax = grid[coords]
+    #speed0 = speeds[coords[0]]
+    #speed1 = speeds[coords[1]]
+    #return np.array((speed0, speed1, minCurvatureMax))
+
+    c0 = np.maximum(0, np.array(coords) - 1)
+    c1 = np.minimum(n - 1, np.array(coords) + 1)
+    opt_bounds = (
+        (speeds[c0[0]], speeds[c1[0]]),
+        (speeds[c0[1]], speeds[c1[1]]))
+
+    opt_args = dict(
+            method="L-BFGS-B",
+            tol=0.01,
+            bounds=opt_bounds,
+            options = dict(
+                maxiter=500,
+            )
+        )
+
+    def fun(x):
+        return max_curvature(angle_bound_bezier, x, u)
+
+    r = spo.minimize(fun, np.array((speeds[coords[0]], speeds[coords[1]])), **opt_args)
+    km = fun(r.x)
+
+    return np.array((float(r.x[0]), float(r.x[1]), float(km)))
+
 
 def ogh_speeds(v0, v1):
     v0v1 = v0[0] * v1[0] + v0[1] * v1[1]
@@ -230,7 +233,6 @@ def compute_grid(method, xSpace, ySpace, *args):
 
 if 0:
     u = np.linspace(0, 1, 1000)
-    speeds = np.linspace(minMag, maxMag, 200)
 
     #angle0 = 4.704496
     #angle1 = -0.4759989
@@ -240,7 +242,7 @@ if 0:
 
     #km: 1.278203867684204, curvatureMax: 1.7430656580501422, x: [0.36114038 0.46252442]
     sa0, sb0 = 0.36114038, 0.46252442
-    #sa0, sb0, _ = find_speeds_for_minimum_curvature_max(angle0, angle1, u, speeds, True)
+    #sa0, sb0, _ = find_speeds_for_minimum_curvature_max(angle0, angle1, u, True)
     print(f"tangent lengths: {(sa0, sb0)}")
     sa1, sb1, _ = ogh_curvature_max(angle0, angle1, u)
     print(f"tangent lengths (OGH): {(sa1, sb1)}")
@@ -257,11 +259,11 @@ if 0:
 
 if 1:
     u = np.linspace(0, 1, 100)
-    speeds = np.linspace(minMag, maxMag, 200)
 
-    res = 30
-    a0Space = np.linspace(0, M.pi * 2, res * 2)
-    a1Space = np.linspace(0, -M.pi, res)
+    hn = 40
+    n = hn * 2 - 1
+    a0Space = np.linspace(0, M.pi * 2, n)
+    a1Space = np.linspace(0, M.pi, hn)
     #a0Space = np.linspace(1.9, 1.91, res)
     #b0Space = np.linspace(-0.5, -0.51, res)
 
@@ -270,33 +272,54 @@ if 1:
     try:
         if not useCache:
             raise OSError
-        grid0 = np.load(f"grid0_{res}.npy")
+        grid0 = np.load(f"grid0_{n}.npy")
     except OSError:
-        grid0 = compute_grid(find_speeds_for_minimum_curvature_max, a0Space, a1Space, u, speeds)
+        grid0 = compute_grid(find_speeds_for_minimum_curvature_max, a0Space, a1Space, u)
         if useCache:
-            np.save(f"grid0_{res}", grid0, allow_pickle=True, fix_imports=False)
+            np.save(f"grid0_{n}", grid0, allow_pickle=True, fix_imports=False)
 
     try:
         if not useCache:
             raise OSError
-        grid1 = np.load(f"grid1_{res}.npy")
+        grid1 = np.load(f"grid1_{n}.npy")
     except OSError:
         grid1 = compute_grid(ogh2_curvature_max, a0Space, a1Space, u)
         if useCache:
-            np.save(f"grid1_{res}", grid1, allow_pickle=True, fix_imports=False)
+            np.save(f"grid1_{n}", grid1, allow_pickle=True, fix_imports=False)
 
     # complete grids by symmetry
-    a1Space = np.linspace(0, -M.pi * 2, res * 2 - 1)
+    a1Space = np.linspace(0, M.pi * 2, n)
     grid0 = np.hstack((grid0, grid0[::-1,-2::-1]))
     grid1 = np.hstack((grid1, grid1[::-1,-2::-1]))
 
-    xaxis=dict(range=[np.min(a0Space), np.max(a0Space)])
-    yaxis=dict(range=[np.min(a1Space), np.max(a1Space)])
+    # extend by repetition to [-pi, 2pi]
+    a0Space = np.linspace(-M.pi, M.pi * 2, n + hn - 1)
+    a1Space = np.linspace(-M.pi, M.pi * 2, n + hn - 1)
+    grid0 = np.hstack((grid0[:,hn:-1], grid0))
+    grid1 = np.hstack((grid1[:,hn:-1], grid1))
+    grid0 = np.vstack((grid0[hn:-1,:], grid0))
+    grid1 = np.vstack((grid1[hn:-1,:], grid1))
+
+    tickvals = [-M.pi, -M.pi * 0.5, 0, M.pi * 0.5, M.pi, M.pi * 1.5, M.pi * 2],
+    ticktext = ['$\pi$', '$-\frac{1}{2}\pi$', '0', '$\frac{1}{2}\pi$', '\pi', '$\frac{3}{2}\pi$', '2\pi']
+    xaxis=dict(
+        range=[np.min(a0Space), np.max(a0Space)],
+        tickvals=tickvals,
+        ticktext=ticktext
+    )
+    yaxis=dict(
+        range=[np.min(a1Space), np.max(a1Space)],
+        tickvals=tickvals,
+        ticktext=ticktext
+    )
 
     fig = plgo.Figure()
     grid0Max = np.max(grid0)
-    fig.add_surface(z=grid0[:,:,2].T, x=a0Space, y=a1Space,
-                    colorscale='inferno', cmin=0, cmax=min(grid0Max, 25), name="minKMax")
+    fig.add_contour(z=grid0[:,:,2].T, x=a0Space, y=a1Space,
+                    colorscale='inferno',
+                    zmin=0, zmax=min(grid0Max, 25),
+                    #cmin=0, cmax=min(grid0Max, 25),
+                    name="minKMax")
     #fig.add_surface(z=grid1[:,:,2].T, x=a0Space, y=a1Space, colorscale='YlOrRd', name="OGH", opacity=0.9)
     #fig = make_subplots(rows=1, cols=2, specs=[[{'type': 'surface'}, {'type': 'surface'}]])
     #fig.add_trace(plgo.Surface(z=grid0[:,:,2], x=a0Space, y=a1Space), row=1, col=1)
@@ -312,14 +335,17 @@ if 1:
     fig.show()
 
     fig = plgo.Figure()
-    fig.add_surface(z=grid0[:,:,0].T, x=a0Space, y=a1Space, colorscale='rdbu', name="minKMax")
+    fig.add_contour(z=grid0[:,:,0].T, x=a0Space, y=a1Space,
+                    colorscale='rdbu',
+                    name="minKMax")
     fig.update_layout(
         scene = dict(
             xaxis_title='Angle0',
             yaxis_title='Angle1',
-            zaxis_title='Speed0',
+            #zaxis_title='Speed0',
             xaxis=xaxis,
             yaxis=yaxis,
-            zaxis=dict(range=[0, 5])))
+            zaxis=dict(range=[0, 10])
+            ))
     fig.show()
 
