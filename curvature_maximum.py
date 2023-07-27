@@ -155,7 +155,7 @@ if 1:
     u = np.linspace(0, 1, 100)
     speeds = np.linspace(minMag, maxMag, 100)
 
-    res = 40
+    res = 100
     a0Space = np.linspace(0, M.pi * 2, res * 2)
     a1Space = np.linspace(0, -M.pi, res)
     #a0Space = np.linspace(1.9, 1.91, res)
