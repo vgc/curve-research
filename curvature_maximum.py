@@ -1,5 +1,6 @@
-import bezier as B
+import bezier
 import numpy as np
+import scipy.optimize as spo
 import math as M
 import plotly.express as plx
 import plotly.graph_objects as plgo
@@ -14,7 +15,7 @@ def make_angle_bound_cubic_bezier_from_dirs(v0, v1):
         p3 = np.array((1, 0))
         p1 = np.array((p0[0] + v0[0] * speed0, p0[1] + v0[1] * speed0))
         p2 = np.array((p3[0] - v1[0] * speed1, p3[1] - v1[1] * speed1))
-        return B.make_cubic_bezier_func(p0, p1, p2, p3)
+        return bezier.make_cubic_bezier_func(p0, p1, p2, p3)
     return angle_bound_cubic_bezier
 
 def make_angle_bound_cubic_bezier(a0, a1):
@@ -28,25 +29,44 @@ def bezier_speed_and_curvature(data):
     dppx = data[2][:, 0]
     dppy = data[2][:, 1]
     speed = np.linalg.norm(data[1], axis=1)
-    curvature = (dppx * dpy - dppy * dpx) / (speed * speed * speed)
+    num = dppx * dpy - dppy * dpx
+    den = speed * speed * speed
+    curvature = np.divide(num, den, out=np.zeros_like(num), where=(den != 0))
     return (speed, curvature)
+
+def bezier_tangent_angles(data):
+    return np.arctan2(data[1][:, 1], data[1][:, 0])
+
+def is_bezier_sampling_cusped(data):
+    #std::atan2(a.det(b), a.dot(b));
+    dpx0 = data[1][:-1, 0]
+    dpy0 = data[1][:-1, 1]
+    dpx1 = data[1][1:, 0]
+    dpy1 = data[1][1:, 1]
+    y = dpx0*dpy1 - dpy0*dpx1
+    x = dpx0*dpx1 + dpy0*dpy1
+    angles = np.arctan2(y, x)
+    return np.max(np.abs(angles)) > M.pi * 0.2
 
 class BezierPlotter():
     def __init__(self):
         self.fig = make_subplots(rows=2, cols=3)
 
-    def plot_bezier(self, bezier, name):
+    def plot_bezier(self, bezier, u, name):
         fig = self.fig
-        u = np.linspace(0, 1, 100)
         data = bezier(u)
         speed, curvature = bezier_speed_and_curvature(data)
         accelerations = np.linalg.norm(data[2], axis=1)
         absCurvature = np.abs(curvature)
-        fig.add_trace(plgo.Line(x=data[0][:, 0], y=data[0][:, 1], name=f"[{name}] p  "), row=1, col=1)
-        fig.add_trace(plgo.Line(x=data[1][:, 0], y=data[1][:, 1], name=f"[{name}] dp "), row=1, col=2)
-        fig.add_trace(plgo.Line(x=data[2][:, 0], y=data[2][:, 1], name=f"[{name}] ddp"), row=1, col=3)
-        fig.add_trace(plgo.Line(x=u, y=speed, name=f"[{name}] speed"), row=2, col=2)
-        fig.add_trace(plgo.Line(x=u, y=absCurvature, name=f"[{name}] curvature"), row=2, col=3)
+        fig.add_trace(plgo.Scatter(mode='lines', x=data[0][:, 0], y=data[0][:, 1], name=f"[{name}] p  "), row=1, col=1)
+        fig.add_trace(plgo.Scatter(mode='lines', x=data[1][:, 0], y=data[1][:, 1], name=f"[{name}] dp "), row=1, col=2)
+        fig.add_trace(plgo.Scatter(mode='lines', x=data[2][:, 0], y=data[2][:, 1], name=f"[{name}] ddp"), row=1, col=3)
+        fig.add_trace(plgo.Scatter(mode='lines', x=u, y=speed, name=f"[{name}] speed"), row=2, col=2)
+        fig.add_trace(plgo.Scatter(mode='lines', x=u, y=absCurvature, name=f"[{name}] curvature"), row=2, col=3)
+
+        tAngles = bezier_tangent_angles(data)
+        fig.add_trace(plgo.Scatter(mode='lines', x=u, y=tAngles, name=f"[{name}] tAngles"), row=2, col=1)
+
         print(f"sum(|ddp|) for [{name}]: {np.sum(accelerations * accelerations) / u.shape[0]}")
         print(f"ksum for [{name}]: {np.sum(absCurvature * absCurvature) / u.shape[0]}")
         dticks = [0.1, 0.2, 1]
@@ -66,8 +86,68 @@ class BezierPlotter():
     def show(self):
         self.fig.show()
 
+KInf = 50000
+
+def max_curvature(angle_bound_bezier, x, u, debug=False):
+    b = angle_bound_bezier(x[0], x[1])
+    data = b(u)
+    _, curvature = bezier_speed_and_curvature(data)
+    kmIdx = np.argmax(np.abs(curvature))
+    opt_bounds = ((u[max(0, kmIdx - 1)], u[min(len(u) - 1, kmIdx + 1)]),)
+
+    if is_bezier_sampling_cusped(data):
+        return KInf
+
+    opt_args = dict(
+        method="L-BFGS-B",
+        tol=0.001,
+        bounds=opt_bounds,
+        options = dict(
+            maxiter=100,
+            #eps=0.0001,
+            #finite_diff_rel_step=0.0001
+        )
+    )
+
+    def kfun(y):
+        data = b(y)
+        _, curvature = bezier_speed_and_curvature(data)
+        curvature = np.abs(curvature)
+        if debug:
+            print(f"{y}: {curvature}")
+        return -curvature
+
+    r = spo.minimize(kfun, np.array((0,)), **opt_args)
+    return -kfun(r.x)
+
 def find_speeds_for_minimum_curvature_max(angle0, angle1, u, speeds, plot=False):
     angle_bound_bezier = make_angle_bound_cubic_bezier(angle0, angle1)
+
+    opt_args = dict(
+            method="L-BFGS-B",
+            tol=0.01,
+            bounds=((speeds[0], speeds[-1]), (speeds[0], speeds[-1])),
+            options = dict(
+                maxiter=500,
+            )
+        )
+
+    def fun(x):
+        return max_curvature(angle_bound_bezier, x, u)
+
+    # todo: there can be local minimums and only playing with input guess does
+    # not always help finding them. a dense grid first could help..
+    rs = [
+        spo.minimize(fun, np.array((speeds[ 0], speeds[ 0])), **opt_args),
+        spo.minimize(fun, np.array((speeds[ 0], speeds[-1])), **opt_args),
+        spo.minimize(fun, np.array((speeds[-1], speeds[ 0])), **opt_args),
+        spo.minimize(fun, np.array((speeds[-1], speeds[-1])), **opt_args)]
+
+    kms = [fun(r.x) for r in rs]
+    km = min(kms)
+    r = rs[kms.index(km)]
+    return np.array((r.x[0], r.x[1], km))
+
     res = len(speeds)
     grid = np.ndarray(shape=(res, res), dtype=float)
     for i, x in enumerate(speeds):
@@ -75,9 +155,24 @@ def find_speeds_for_minimum_curvature_max(angle0, angle1, u, speeds, plot=False)
             data = angle_bound_bezier(x, y)(u)
             _, curvature = bezier_speed_and_curvature(data)
             curvatureMax = np.max(np.abs(curvature))
+            # maximum can be missed by the sampling
+            if is_bezier_sampling_cusped(data):
+                curvatureMax = KInf
             grid[i][j] = curvatureMax
     if plot:
-        fig = plgo.Figure(data=[plgo.Surface(z=grid, x=speeds, y=speeds)])
+        gridMin = np.min(grid)
+        gridMax = np.max(grid)
+        cmax = min(gridMax, gridMin + 50)
+        cscale = plx.colors.sequential.Turbo
+        cscale.append('#303030')
+        fig = plgo.Figure(data=[plgo.Surface(
+            z=grid, x=speeds, y=speeds, colorscale=cscale, cmin=gridMin, cmax=cmax)])
+        fig.update_layout(
+            scene = dict(
+                xaxis_title='Speed0',
+                yaxis_title='Speed1',
+                zaxis_title='Curvature Maximum',
+                zaxis=dict(range=[0, min(gridMax, KInf-1)])))
         fig.show()
     coords = np.divmod(grid.argmin(), grid.shape[1])
     minCurvatureMax = grid[coords]
@@ -108,7 +203,7 @@ def clamp(x, a, b):
    return max(min(x, b), a)
 
 minMag = 0.2
-maxMag = 2.5
+maxMag = 3
 
 def clamp_speed(x):
    return clamp(x, minMag, maxMag)
@@ -134,78 +229,97 @@ def compute_grid(method, xSpace, ySpace, *args):
     return grid
 
 if 0:
-    u = np.linspace(0, 1, 100)
-    speeds = np.linspace(minMag, maxMag, 100)
+    u = np.linspace(0, 1, 1000)
+    speeds = np.linspace(minMag, maxMag, 200)
 
-    angle0 = 5.478
-    angle1 = -2.98
+    #angle0 = 4.704496
+    #angle1 = -0.4759989
 
-    sa0, sb0, _ = find_speeds_for_minimum_curvature_max(angle0, angle1, u, speeds, False)
+    angle0 = 0.0
+    angle1 = -0.5711986642890533
+
+    #km: 1.278203867684204, curvatureMax: 1.7430656580501422, x: [0.36114038 0.46252442]
+    sa0, sb0 = 0.36114038, 0.46252442
+    #sa0, sb0, _ = find_speeds_for_minimum_curvature_max(angle0, angle1, u, speeds, True)
     print(f"tangent lengths: {(sa0, sb0)}")
     sa1, sb1, _ = ogh_curvature_max(angle0, angle1, u)
     print(f"tangent lengths (OGH): {(sa1, sb1)}")
 
     plotter = BezierPlotter()
     b = make_angle_bound_cubic_bezier(angle0, angle1)
-    plotter.plot_bezier(b(sa0, sb0), "minKMax")
-    plotter.plot_bezier(b(sa1, sb1), "OGH")
+
+    max_curvature(b, (sa0, sb0), True)
+    plotter.plot_bezier(b(sa0, sb0), u, "minKMax")
+    #plotter.plot_bezier(b(sa1, sb1), u, "OGH")
+    #plotter.plot_bezier(b(8, 4.86), u, "test")
+
     plotter.show()
 
 if 1:
     u = np.linspace(0, 1, 100)
-    speeds = np.linspace(minMag, maxMag, 100)
+    speeds = np.linspace(minMag, maxMag, 200)
 
-    res = 100
+    res = 30
     a0Space = np.linspace(0, M.pi * 2, res * 2)
     a1Space = np.linspace(0, -M.pi, res)
     #a0Space = np.linspace(1.9, 1.91, res)
     #b0Space = np.linspace(-0.5, -0.51, res)
 
+    useCache = False
+
     try:
+        if not useCache:
+            raise OSError
         grid0 = np.load(f"grid0_{res}.npy")
     except OSError:
         grid0 = compute_grid(find_speeds_for_minimum_curvature_max, a0Space, a1Space, u, speeds)
-        np.save(f"grid0_{res}", grid0, allow_pickle=True, fix_imports=False)
+        if useCache:
+            np.save(f"grid0_{res}", grid0, allow_pickle=True, fix_imports=False)
 
     try:
+        if not useCache:
+            raise OSError
         grid1 = np.load(f"grid1_{res}.npy")
     except OSError:
         grid1 = compute_grid(ogh2_curvature_max, a0Space, a1Space, u)
-        np.save(f"grid1_{res}", grid1, allow_pickle=True, fix_imports=False)
+        if useCache:
+            np.save(f"grid1_{res}", grid1, allow_pickle=True, fix_imports=False)
+
+    # complete grids by symmetry
+    a1Space = np.linspace(0, -M.pi * 2, res * 2 - 1)
+    grid0 = np.hstack((grid0, grid0[::-1,-2::-1]))
+    grid1 = np.hstack((grid1, grid1[::-1,-2::-1]))
 
     xaxis=dict(range=[np.min(a0Space), np.max(a0Space)])
     yaxis=dict(range=[np.min(a1Space), np.max(a1Space)])
 
     fig = plgo.Figure()
-    fig.add_surface(z=grid0[:,:,2].T, x=a0Space, y=a1Space, colorscale='YlGnBu', name="minKMax")
+    grid0Max = np.max(grid0)
+    fig.add_surface(z=grid0[:,:,2].T, x=a0Space, y=a1Space,
+                    colorscale='inferno', cmin=0, cmax=min(grid0Max, 25), name="minKMax")
     #fig.add_surface(z=grid1[:,:,2].T, x=a0Space, y=a1Space, colorscale='YlOrRd', name="OGH", opacity=0.9)
     #fig = make_subplots(rows=1, cols=2, specs=[[{'type': 'surface'}, {'type': 'surface'}]])
     #fig.add_trace(plgo.Surface(z=grid0[:,:,2], x=a0Space, y=a1Space), row=1, col=1)
     #fig.add_trace(plgo.Surface(z=grid1[:,:,2], x=a0Space, y=a1Space), row=1, col=2)
-    fig.update_layout(scene = dict(
-                    xaxis_title='Angle0',
-                    yaxis_title='Angle1',
-                    zaxis_title='Curvature Maximum',
-                    xaxis=xaxis,
-                    yaxis=yaxis,
-                    zaxis=dict(range=[np.min(grid0), np.max(grid0)])))
+    fig.update_layout(
+        scene = dict(
+            xaxis_title='Angle0',
+            yaxis_title='Angle1',
+            zaxis_title='Curvature Maximum',
+            xaxis=xaxis,
+            yaxis=yaxis,
+            zaxis=dict(range=[0, min(200, grid0Max * 2)])))
     fig.show()
 
     fig = plgo.Figure()
-    fig.add_surface(z=grid0[:,:,0].T, x=a0Space, y=a1Space, colorscale='YlGnBu', name="Speed0")
-    fig.update_layout(scene = dict(
-                    xaxis_title='Angle0',
-                    yaxis_title='Angle1',
-                    zaxis_title='Speed',
-                    xaxis=xaxis,
-                    yaxis=yaxis,))
+    fig.add_surface(z=grid0[:,:,0].T, x=a0Space, y=a1Space, colorscale='rdbu', name="minKMax")
+    fig.update_layout(
+        scene = dict(
+            xaxis_title='Angle0',
+            yaxis_title='Angle1',
+            zaxis_title='Speed0',
+            xaxis=xaxis,
+            yaxis=yaxis,
+            zaxis=dict(range=[0, 5])))
     fig.show()
-    fig = plgo.Figure()
-    fig.add_surface(z=grid0[:,:,1].T, x=a0Space, y=a1Space, colorscale='YlOrRd', name="Speed1")
-    fig.update_layout(scene = dict(
-                    xaxis_title='Angle0',
-                    yaxis_title='Angle1',
-                    zaxis_title='Speed',
-                    xaxis=xaxis,
-                    yaxis=yaxis,))
-    fig.show()
+
