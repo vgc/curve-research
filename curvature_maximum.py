@@ -123,7 +123,7 @@ def max_curvature(angle_bound_bezier, x, u, debug=False):
 def find_speeds_for_minimum_curvature_max(angle0, angle1, u, plot=False):
     angle_bound_bezier = make_angle_bound_cubic_bezier(angle0, angle1)
 
-    n = 20
+    n = 30
     speeds = np.linspace(minMag, maxMag, n)
     grid = np.ndarray(shape=(n, n), dtype=float)
     for i, x in enumerate(speeds):
@@ -260,14 +260,14 @@ if 0:
 if 1:
     u = np.linspace(0, 1, 100)
 
-    hn = 40
+    hn = 200
     n = hn * 2 - 1
     a0Space = np.linspace(0, M.pi * 2, n)
     a1Space = np.linspace(0, M.pi, hn)
     #a0Space = np.linspace(1.9, 1.91, res)
     #b0Space = np.linspace(-0.5, -0.51, res)
 
-    useCache = False
+    useCache = True
 
     try:
         if not useCache:
