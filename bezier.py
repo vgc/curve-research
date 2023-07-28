@@ -1,22 +1,84 @@
 import numpy as np
 
-def cubic_bezier(t, p0, p1, p2, p3):
-    u = 1 - t
-    u = np.array(u)[..., np.newaxis]
-    t = np.array(t)[..., np.newaxis]
-    t2 = t * t
-    t3 = t2 * t
-    u2 = u * u
-    u3 = u2 * u
-    p = u3 * p0 + 3 * u2 * t * p1 + 3 * u * t2 * p2 + t3 * p3
-    dp = 3 * u2 * (p1 - p0) + (6 * u * t) * (p2 - p1) + (3 * t2) * (p3 - p2)
-    ddp = 6 * u * (p2 - 2 * p1 + p0) + 6 * t * (p3 - 2 * p2 + p1)
-    return (p, dp, ddp)
+class CubicBezier():
+    # p0, p1, p2, and p3 must broadcastable to each other
+    def __init__(self, p0, p1, p2, p3, gridTangents=False):
+        self.p0 = np.array(p0, copy=False)
+        self.p1 = p1 = np.array(p1, copy=False)
+        self.p2 = p2 = np.array(p2, copy=False)
+        self.p3 = np.array(p3, copy=False)
+        if gridTangents:
+            self.p1 = np.repeat(p1[:, np.newaxis, ...], p2.shape[0], 1)
+            self.p2 = np.repeat(p2[np.newaxis, ...], p1.shape[0], 0)
 
-def make_cubic_bezier_func(p0, p1, p2, p3):
-    def bound_cubic_bezier(t):
-        return cubic_bezier(t, p0, p1, p2, p3)
-    return bound_cubic_bezier
+    # pA, pB, vAngleA, and vAngleB must be broadcastable against each other.
+    # speedA, and speedB must have the same shape.
+    @staticmethod
+    def fromTangentDirsAndSpeeds(
+        pA, pB, vDirA, vDirB, speedA, speedB, gridTangents=False):
+
+        p1 = pA + np.multiply.outer(speedA, vDirA)
+        p2 = pB - np.multiply.outer(speedB, vDirB)
+        return CubicBezier(pA, p1, p2, pB, gridTangents)
+
+    # pA, pB, vAngleA, and vAngleB must be broadcastable against each other.
+    # speedA, and speedB must have the same shape.
+    @staticmethod
+    def fromTangentAnglesAndSpeeds(
+        pA, pB, vAngleA, vAngleB, speedA, speedB, gridTangents=False):
+
+        vDirA = (np.cos(vAngleA), np.sin(vAngleA))
+        vDirB = (np.cos(vAngleB), np.sin(vAngleB))
+        if np.shape(vDirA[0]):
+            vDirA = np.column_stack(vDirA)
+            vDirB = np.column_stack(vDirB)
+
+        p1 = pA + np.multiply.outer(speedA, vDirA)
+        p2 = pB - np.multiply.outer(speedB, vDirB)
+        return CubicBezier(pA, p1, p2, pB, gridTangents)
+
+    def __call__(self, t):
+        p0, p1, p2, p3 = self.p0, self.p1, self.p2, self.p3
+
+        # if t is an array, let's make it a np.array
+        if np.shape(t):
+            t = np.array(t, copy=False)
+
+        u = 1 - t
+        t2 = t * t
+        t3 = t2 * t
+        u2 = u * u
+        u3 = u2 * u
+
+        d1 = (p1 - p0, p2 - p1, p3 - p2)
+        d2 = (d1[1] - d1[0], d1[2] - d1[1])
+
+        p = ( np.multiply.outer(p0, u3)
+            + np.multiply.outer(p1, 3 * u2 * t)
+            + np.multiply.outer(p2, 3 * u * t2)
+            + np.multiply.outer(p3, t3))
+
+        v = ( np.multiply.outer(d1[0], 3 * u2)
+            + np.multiply.outer(d1[1], 6 * u * t)
+            + np.multiply.outer(d1[2], 3 * t2))
+
+        a = ( np.multiply.outer(d2[0], 6 * u)
+            + np.multiply.outer(d2[1], 6 * t))
+
+        return (p, v, a, t)
+
+def compute_speed_and_curvature(data):
+    _, v, a, t = data
+    coordAxis= -2 if np.shape(t) else -1
+    vx = v.take(indices=0, axis=coordAxis)
+    vy = v.take(indices=1, axis=coordAxis)
+    ax = a.take(indices=0, axis=coordAxis)
+    ay = a.take(indices=1, axis=coordAxis)
+    speed = np.linalg.norm(data[1], axis=coordAxis)
+    num = ax * vy - ay * vx
+    den = speed * speed * speed
+    curvature = np.divide(num, den, out=np.zeros_like(num), where=(den != 0))
+    return (speed, curvature, t)
 
 def quad_bezier(t, p0, p1, p2):
     u = 1 - t
