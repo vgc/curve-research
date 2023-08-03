@@ -9,16 +9,26 @@ from plotly.subplots import make_subplots
 pA = (0, 0)
 pB = (2, 0)
 pC = (3, 1)
+pD = (4, 3)
 t0 = (1, 0)
 t1 = (1, 0)
 t2 = (0, 1)
+t3 = (0, 1)
 
 b0 = bezier.CubicBezier.fromTangentDirsAndSpeeds(pA, pB, t0, t1, 0.66, 0.66)
-b1 = bezier.CubicBezier.fromTangentDirsAndSpeeds(pB, pC, t1, t2, 0.66, 0.3)
+b1 = bezier.CubicBezier.fromTangentDirsAndSpeeds(pB, pC, t1, t2, 0.66, 0.66)
+b2 = bezier.CubicBezier.fromTangentDirsAndSpeeds(pC, pD, t2, t3, 0.66, 0.66)
 
 def proto(u, dt0, dt1):
     bt = bezier.CubicBezier(0, dt0 / 3, 1 - dt1 / 3, 1)
     return bt(u)[0]
+
+def proto2(u, dt0, dt1):
+    bt0 = bezier.CubicBezier(0, dt0 / 3, 2 / 3, 1)
+    bt1 = bezier.CubicBezier(0, 1 / 3, 1 - dt1 / 3, 1)
+    result = np.where(u < 0.5, bt0(u * 2)[0] * 0.5, bt1((u - 0.5) * 2)[0] * 0.5 + 0.5)
+    print(result)
+    return result
 
 # plotting
 
@@ -91,4 +101,4 @@ def plotStrokes(beziers, r0, r1, u):
     fig.show()
 
 u = np.linspace(0, 1, 200)
-plotStrokes((b0, b1), 0.2, 0.8, u)
+plotStrokes((b0, b1, b2), 0.2, 2.0, u)
