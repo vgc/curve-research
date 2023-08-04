@@ -37,6 +37,9 @@ class CubicBezier():
         p2 = pB - np.multiply.outer(speedB, vDirB)
         return CubicBezier(pA, p1, p2, pB, gridTangents)
 
+    def cps(self):
+        return (self.p0, self.p1, self.p2, self.p3)
+
     def __call__(self, t):
         p0, p1, p2, p3 = self.p0, self.p1, self.p2, self.p3
 
@@ -74,7 +77,7 @@ def compute_speed_and_curvature(data):
     vy = v.take(indices=1, axis=coordAxis)
     ax = a.take(indices=0, axis=coordAxis)
     ay = a.take(indices=1, axis=coordAxis)
-    speed = np.linalg.norm(data[1], axis=coordAxis)
+    speed = np.linalg.norm(v, axis=coordAxis)
     num = ax * vy - ay * vx
     den = speed * speed * speed
     curvature = np.divide(num, den, out=np.zeros_like(num), where=(den != 0))
